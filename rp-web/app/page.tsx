@@ -58,6 +58,10 @@ export default function Page() {
 	  (async () => {
 		try {
 		  const res = await fetch(`${API_URL}/api/messages?session_id=${encodeURIComponent(
+			headers: {
+				"Content-Type": "application/json",
+				"X-Access-Key": process.env.NEXT_PUBLIC_ACCESS_KEY!,
+			},
 			  saved
 			)
 			}&limit=50`
@@ -92,7 +96,10 @@ export default function Page() {
     try {
       const res = await fetch(`${API_URL}/api/chat_stream`, {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: {
+			"Content-Type": "application/json",
+			"X-Access-Key": process.env.NEXT_PUBLIC_ACCESS_KEY!,
+		},
         body: JSON.stringify({
           text: userText,
           session_id: sessionId,
