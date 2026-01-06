@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 
 type ChatMessage = {
   role: "user" | "assistant";
@@ -13,7 +13,6 @@ type SSEEvent = {
 };
 
 function parseSSE(buffer: string): { events: SSEEvent[]; rest: string } {
-  // SSE frames separated by blank line
   const parts = buffer.split("\n\n");
   const rest = parts.pop() ?? "";
   const events: SSEEvent[] = [];
@@ -45,9 +44,35 @@ export default function Page() {
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [input, setInput] = useState("");
   const [loading, setLoading] = useState(false);
+	const API_URL = process.env.NEXT_PUBLIC_API_URL || "http://127.0.0.1:8000";
 
-  // Step 3: backend will return a real session_id we reuse
   const [sessionId, setSessionId] = useState<string | null>(null);
+
+  // Load saved session on refresh
+	useEffect(() => {
+	  const saved = localStorage.getItem("rp_session_id");
+	  if (!saved) return;
+
+	  setSessionId(saved);
+
+	  (async () => {
+		try {
+		  const res = await fetch(`${API_URL}/api/messages?session_id=${encodeURIComponent(
+			  saved
+			)
+			}&limit=50`
+		  );
+		  if (!res.ok) return;
+
+		  const data = await res.json();
+		  // data should be: [{role, content}, ...]
+		  setMessages(data);
+		} catch {
+		  // ignore for now
+		}
+	  })();
+	}, []);
+
 
   async function sendMessage() {
     if (!input.trim() || loading) return;
@@ -65,7 +90,7 @@ export default function Page() {
     const t0 = performance.now();
 
     try {
-      const res = await fetch("http://127.0.0.1:8000/api/chat_stream", {
+      const res = await fetch(`${API_URL}/api/chat_stream`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -84,7 +109,7 @@ export default function Page() {
       const reader = res.body.getReader();
       const decoder = new TextDecoder();
 
-      // Replace Thinking... with empty assistant message so we can stream into it
+      // Replace "Thinking…" with empty assistant message so we can stream into it
       setMessages((prev) => {
         const next = [...prev];
         next[next.length - 1] = { role: "assistant", content: "" };
@@ -107,7 +132,10 @@ export default function Page() {
           if (evt.event === "start") {
             reqId = evt.data?.req_id;
             const sid = evt.data?.session_id;
-            if (sid) setSessionId(sid);
+            if (sid) {
+              setSessionId(sid);
+              localStorage.setItem("rp_session_id", sid);
+            }
           } else if (evt.event === "delta") {
             const delta = evt.data?.text ?? "";
             if (!delta) continue;
