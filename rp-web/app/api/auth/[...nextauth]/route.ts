@@ -1,6 +1,7 @@
 import NextAuth from "next-auth";
 import EmailProvider from "next-auth/providers/email";
-import PostgresAdapter from "@auth/pg-adapter";
+import { PostgresAdapter } from "@auth/pg-adapter";
+
 import { getPool } from "@/lib/pg";
 
 export const runtime = "nodejs";
