@@ -218,7 +218,7 @@ export default function Page() {
               flushTimerRef.current = window.setTimeout(() => {
                 flushTimerRef.current = null;
                 flushAssistant();
-              }, 50);
+              }, 100);
             }
           } else if (evt.event === "error") {
             throw new Error(evt.data?.error ?? "Stream error");
