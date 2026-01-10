@@ -1,7 +1,6 @@
 import NextAuth from "next-auth";
 import EmailProvider from "next-auth/providers/email";
-import { PostgresAdapter } from "@auth/pg-adapter";
-
+import PostgresAdapter from "@auth/pg-adapter";
 import { getPool } from "@/lib/pg";
 
 export const runtime = "nodejs";
@@ -10,22 +9,15 @@ const pool = getPool();
 
 const authHandler = NextAuth({
   adapter: PostgresAdapter(pool),
-
   providers: [
     EmailProvider({
       server: process.env.EMAIL_SERVER,
       from: process.env.EMAIL_FROM,
     }),
   ],
-
-  pages: {
-    signIn: "/signin",
-    error: "/signin",
-  },
-
+  pages: { signIn: "/signin", error: "/signin" },
   callbacks: {
     async signIn({ user, account }) {
-      // Gate ONLY email magic-link style sign-ins
       const provider = account?.provider;
       if (provider !== "email") return true;
 
@@ -49,7 +41,6 @@ const authHandler = NextAuth({
 
         if (claim.rowCount === 0) return false;
 
-        // consume claim so it can't be reused
         await client.query(
           `update invite_claims set consumed_at = now() where id = $1`,
           [claim.rows[0].id]
