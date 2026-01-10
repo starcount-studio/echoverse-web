@@ -117,9 +117,11 @@ function emptyPlayer(): PlayerSheet {
 }
 
 export default function Page() {
-  const { data: auth } = useSession();
+  const sessionHook = useSession();
+  const auth = sessionHook?.data;
   const userEmail =
-    (auth?.user?.email ?? "").toString().trim().toLowerCase() || null;
+	(auth?.user?.email ?? "").toString().trim().toLowerCase() || null;
+
 
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [loading, setLoading] = useState(false);
