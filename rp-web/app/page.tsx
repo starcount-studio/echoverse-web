@@ -16,6 +16,9 @@ function parseSSE(buffer: string): { events: SSEEvent[]; rest: string } {
   const parts = buffer.split("\n\n");
   const rest = parts.pop() ?? "";
   const events: SSEEvent[] = [];
+  const pendingAssistantTextRef = useRef<string>("");
+  const streamRafRef = useRef<number | null>(null);
+
 
   for (const part of parts) {
     const lines = part.split("\n").filter(Boolean);
@@ -113,6 +116,7 @@ export default function Page() {
       { role: "user", content: userText },
       { role: "assistant", content: "Thinking…" },
     ]);
+	pendingAssistantTextRef.current = "";
 
     // Immediately keep the view pinned to bottom when sending
     setTimeout(() => {
@@ -173,32 +177,28 @@ export default function Page() {
               setSessionId(sid);
               localStorage.setItem("rp_session_id", sid);
             }
-          } else if (evt.event === "delta") {
-            const delta = evt.data?.text ?? "";
-            if (!delta) continue;
+		  } else if (evt.event === "delta") {
+			const delta = evt.data?.text ?? "";
+			if (!delta) continue;
 
-            setMessages((prev) => {
-              const next = [...prev];
-              const last = next[next.length - 1];
-              next[next.length - 1] = {
-                role: "assistant",
-                content: (last?.content ?? "") + delta,
-              };
-              return next;
-            });
+			// Batch tiny stream chunks to avoid re-render spam (fixes typing lag)
+			pendingAssistantTextRef.current += delta;
 
-            // Keep pinned to bottom while streaming
-            messagesEndRef.current?.scrollIntoView({
-              behavior: "auto",
-              block: "end",
-            });
-          } else if (evt.event === "meta") {
-            finalMeta = evt.data;
-          } else if (evt.event === "error") {
-            throw new Error(evt.data?.error ?? "Backend streaming error");
-          }
-        }
-      }
+			if (streamRafRef.current == null) {
+				streamRafRef.current = requestAnimationFrame(() => {
+				streamRafRef.current = null;
+
+				setMessages((prev) => {
+					const next = [...prev];
+					next[next.length - 1] = {
+					role: "assistant",
+					content: pendingAssistantTextRef.current,
+					};
+					return next;
+				}	);
+				});
+			}
+
 
       const roundtripMs = performance.now() - t0;
 
@@ -245,6 +245,11 @@ export default function Page() {
     } finally {
       setLoading(false);
       sendInFlightRef.current = false;
+	  if (streamRafRef.current != null) {
+		cancelAnimationFrame(streamRafRef.current);
+		streamRafRef.current = null;
+		}
+
     }
   }
 
