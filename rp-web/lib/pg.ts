@@ -11,12 +11,19 @@ export function getPool() {
   }
 
   if (!global.__pgPool) {
-    global.__pgPool = new Pool({
+    const pool = new Pool({
       connectionString: process.env.DATABASE_URL,
       ssl: { rejectUnauthorized: false },
       max: 5,
-      // IMPORTANT: make adapter tables resolve to auth.* first
     });
+
+    // ✅ Neon pooled-safe: set search_path AFTER connect
+    pool.on("connect", (client) => {
+      // Fire-and-forget is fine here
+      client.query(`set search_path to auth,public;`).catch(() => {});
+    });
+
+    global.__pgPool = pool;
   }
 
   return global.__pgPool;
