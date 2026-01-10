@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 
 type ChatMessage = {
   role: "user" | "assistant";
@@ -44,43 +44,65 @@ export default function Page() {
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [input, setInput] = useState("");
   const [loading, setLoading] = useState(false);
-	const API_URL = process.env.NEXT_PUBLIC_API_URL || "http://127.0.0.1:8000";
+  const API_URL = process.env.NEXT_PUBLIC_API_URL || "http://127.0.0.1:8000";
+  const ACCESS_KEY = process.env.NEXT_PUBLIC_ACCESS_KEY!;
 
   const [sessionId, setSessionId] = useState<string | null>(null);
 
+  // ✅ Step 1: Auto-scroll anchor + scroll container ref
+  const messagesEndRef = useRef<HTMLDivElement | null>(null);
+  const scrollRef = useRef<HTMLDivElement | null>(null);
+
+  // ✅ Auto-scroll whenever messages change (initial load + new messages)
+  useEffect(() => {
+	  const el = scrollRef.current;
+	  if (!el) return;
+
+	  // wait for layout to settle, then jump to bottom
+	  requestAnimationFrame(() => {
+		el.scrollTop = el.scrollHeight;
+	  });
+	}, [messages.length]);
+
+
+  // ✅ Step 3 helper: ensures we don't send with a missing session due to timing.
+  // We rely on backend returning session_id in the SSE "start" event.
+  // So we don't "create session" separately — we just avoid rapid double-sends.
+  const sendInFlightRef = useRef(false);
+
   // Load saved session on refresh
-	useEffect(() => {
-	  const saved = localStorage.getItem("rp_session_id");
-	  if (!saved) return;
+  useEffect(() => {
+    const saved = localStorage.getItem("rp_session_id");
+    if (!saved) return;
 
-	  setSessionId(saved);
+    setSessionId(saved);
 
-	  (async () => {
-		try {
-		  const res = await fetch(
-			`${API_URL}/api/messages?session_id=${encodeURIComponent(saved)}&limit=50`,
-			{
-			  headers: {
-				"Content-Type": "application/json",
-				"X-Access-Key": process.env.NEXT_PUBLIC_ACCESS_KEY!,
-			  },
-			}
-		  );
+    (async () => {
+      try {
+        const res = await fetch(
+          `${API_URL}/api/messages?session_id=${encodeURIComponent(saved)}&limit=50`,
+          {
+            headers: {
+              "Content-Type": "application/json",
+              "X-Access-Key": ACCESS_KEY,
+            },
+          }
+        );
 
-		  if (!res.ok) return;
+        if (!res.ok) return;
 
-		  const data = await res.json();
-		  setMessages(data);
-		} catch {
-		  // ignore for now
-		}
-	  })();
-	}, []);
-
-
+        const data = await res.json();
+        setMessages(data);
+      } catch {
+        // ignore for now
+      }
+    })();
+  }, [API_URL, ACCESS_KEY]);
 
   async function sendMessage() {
     if (!input.trim() || loading) return;
+    if (sendInFlightRef.current) return; // ✅ Step 3: prevent rapid double send (mobile taps / Enter)
+    sendInFlightRef.current = true;
 
     const userText = input;
     setInput("");
@@ -92,18 +114,23 @@ export default function Page() {
       { role: "assistant", content: "Thinking…" },
     ]);
 
+    // Immediately keep the view pinned to bottom when sending
+    setTimeout(() => {
+      messagesEndRef.current?.scrollIntoView({ behavior: "auto", block: "end" });
+    }, 0);
+
     const t0 = performance.now();
 
     try {
       const res = await fetch(`${API_URL}/api/chat_stream`, {
         method: "POST",
         headers: {
-			"Content-Type": "application/json",
-			"X-Access-Key": process.env.NEXT_PUBLIC_ACCESS_KEY!,
-		},
+          "Content-Type": "application/json",
+          "X-Access-Key": ACCESS_KEY,
+        },
         body: JSON.stringify({
           text: userText,
-          session_id: sessionId,
+          session_id: sessionId, // may be null on first-ever mobile use; backend should create and return one
           world_name: "Dev World",
         }),
       });
@@ -140,6 +167,8 @@ export default function Page() {
           if (evt.event === "start") {
             reqId = evt.data?.req_id;
             const sid = evt.data?.session_id;
+
+            // ✅ Step 3: capture session as soon as backend tells us
             if (sid) {
               setSessionId(sid);
               localStorage.setItem("rp_session_id", sid);
@@ -156,6 +185,12 @@ export default function Page() {
                 content: (last?.content ?? "") + delta,
               };
               return next;
+            });
+
+            // Keep pinned to bottom while streaming
+            messagesEndRef.current?.scrollIntoView({
+              behavior: "auto",
+              block: "end",
             });
           } else if (evt.event === "meta") {
             finalMeta = evt.data;
@@ -209,49 +244,62 @@ export default function Page() {
       });
     } finally {
       setLoading(false);
+      sendInFlightRef.current = false;
     }
   }
 
-  return (
-    <main className="flex flex-col h-screen max-w-md mx-auto border-x">
-      <header className="p-3 border-b text-center font-semibold">
-        RP Chat {sessionId ? `· ${sessionId.slice(0, 8)}` : ""}
-      </header>
+	return (
+	  <main className="flex flex-col h-[100dvh] max-w-md mx-auto border-x">
+		<header className="p-3 border-b text-center font-semibold shrink-0">
+		  RP Chat {sessionId ? `· ${sessionId.slice(0, 8)}` : ""}
+		</header>
 
-      <div className="flex-1 overflow-y-auto p-3 space-y-2">
-        {messages.map((m, i) => (
-          <div
-            key={i}
-            className={`whitespace-pre-wrap rounded-lg px-3 py-2 text-sm ${
-              m.role === "user"
-                ? "bg-blue-500 text-white ml-auto"
-                : "bg-gray-200 text-gray-900 mr-auto"
-            }`}
-          >
-            {m.content}
-          </div>
-        ))}
-      </div>
+		{/* Messages */}
+		<div
+		  ref={scrollRef}
+		  className="flex-1 min-h-0 overflow-y-auto px-3 pt-3 pb-28 space-y-2"
+		>
+		  {messages.map((m, i) => (
+			<div
+			  key={i}
+			  className={`whitespace-pre-wrap rounded-lg px-3 py-2 text-base ${
+				m.role === "user"
+				  ? "bg-blue-500 text-white ml-auto"
+				  : "bg-gray-200 text-gray-900 mr-auto"
+			  }`}
+			>
+			  {m.content}
+			</div>
+		  ))}
 
-      <div className="p-3 border-t flex gap-2">
-        <input
-          className="flex-1 border rounded px-3 py-2 text-sm"
-          placeholder="Type a message…"
-          value={input}
-          disabled={loading}
-          onChange={(e) => setInput(e.target.value)}
-          onKeyDown={(e) => {
-            if (e.key === "Enter") sendMessage();
-          }}
-        />
-        <button
-          onClick={sendMessage}
-          disabled={loading}
-          className="px-4 py-2 rounded bg-blue-600 text-white disabled:opacity-50"
-        >
-          Send
-        </button>
-      </div>
-    </main>
-  );
+		  {/* bottom spacer */}
+		  <div ref={messagesEndRef} />
+		</div>
+
+		{/* Input bar */}
+		<div
+		  className="border-t bg-white px-3 py-2 flex gap-2 fixed bottom-0 left-0 right-0 max-w-md mx-auto"
+		  style={{ paddingBottom: "calc(env(safe-area-inset-bottom) + 8px)" }}
+		>
+		  <input
+			className="flex-1 border rounded px-3 h-11 text-base"
+			placeholder="Type a message…"
+			value={input}
+			disabled={loading}
+			onChange={(e) => setInput(e.target.value)}
+			onKeyDown={(e) => {
+			  if (e.key === "Enter") sendMessage();
+			}}
+		  />
+		  <button
+			onClick={sendMessage}
+			disabled={loading}
+			className="px-4 h-11 rounded bg-blue-600 text-white text-base disabled:opacity-50"
+		  >
+			Send
+		  </button>
+		</div>
+	  </main>
+	);
+
 }
