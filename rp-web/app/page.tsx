@@ -164,13 +164,17 @@ export default function Page() {
     });
   }, [messages.length]);
 
-  function buildHeaders() {
-    return {
-      "Content-Type": "application/json",
-      "X-Access-Key": ACCESS_KEY,
-      "X-User-Email": userEmail ?? "",
-    } as Record<string, string>;
-  }
+	function buildHeaders(userEmail?: string | null) {
+	  const h: Record<string, string> = {
+		"Content-Type": "application/json",
+		"X-Access-Key": process.env.NEXT_PUBLIC_ACCESS_KEY!,
+	  };
+
+	  if (userEmail) h["X-User-Email"] = userEmail;
+
+	  return h;
+	}
+
 
   async function fetchSessions() {
     if (!userEmail) return;
@@ -179,7 +183,7 @@ export default function Page() {
 
     try {
       const res = await fetch(`${API_URL}/api/sessions?limit=50`, {
-        headers: buildHeaders(),
+        headers: buildHeaders(userEmail),
       });
       if (!res.ok) throw new Error(await res.text());
 
