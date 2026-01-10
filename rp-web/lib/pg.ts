@@ -4,6 +4,13 @@ declare global {
   // eslint-disable-next-line no-var
   var __pgPool: Pool | undefined;
 }
+global.__pgPool = new Pool({
+  connectionString: process.env.DATABASE_URL,
+  ssl: { rejectUnauthorized: false },
+  max: 5,
+  // IMPORTANT: make adapter tables resolve to auth.* first
+  options: "-c search_path=auth,public",
+});
 
 export function getPool() {
   if (!process.env.DATABASE_URL) {

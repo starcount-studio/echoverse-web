@@ -8,12 +8,7 @@ export const runtime = "nodejs";
 const pool = getPool();
 
 const authHandler = NextAuth({
-  adapter: PostgresAdapter(pool, {
-	  usersTable: "auth_users",
-	  accountsTable: "auth_accounts",
-	  sessionsTable: "auth_sessions",
-	  verificationTokensTable: "auth_verification_tokens",
-	}),
+  adapter: PostgresAdapter(pool),
 
   providers: [
     EmailProvider({
