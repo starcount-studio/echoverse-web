@@ -27,26 +27,30 @@ const authHandler = NextAuth({
       const client = await pool.connect();
       try {
         const claim = await client.query(
-          `
-          select id
-          from invite_claims
-          where email = $1
-            and expires_at > now()
-            and consumed_at is null
-          order by created_at desc
-          limit 1
-          `,
-          [email]
-        );
+		  `
+		  select id, consumed_at
+		  from invite_claims
+		  where email = $1
+			and expires_at > now()
+			and (consumed_at is null or consumed_at > now() - interval '15 minutes')
+		  order by created_at desc
+		  limit 1
+		  `,
+		  [email]
+		);
 
-        if (claim.rowCount === 0) return false;
+		if ((claim.rowCount ?? 0) === 0) return false;
 
-        await client.query(
-          `update invite_claims set consumed_at = now() where id = $1`,
-          [claim.rows[0].id]
-        );
+		// Only consume if it's not already consumed
+		if (!claim.rows[0].consumed_at) {
+		  await client.query(
+			`update invite_claims set consumed_at = now() where id = $1 and consumed_at is null`,
+			[claim.rows[0].id]
+		  );
+		}
 
-        return true;
+		return true;
+
       } finally {
         client.release();
       }
