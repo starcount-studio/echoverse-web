@@ -16,7 +16,6 @@ export function getPool() {
       ssl: { rejectUnauthorized: false },
       max: 5,
       // IMPORTANT: make adapter tables resolve to auth.* first
-      options: "-c search_path=auth,public",
     });
   }
 
