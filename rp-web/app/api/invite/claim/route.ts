@@ -40,7 +40,7 @@ export async function POST(req: Request) {
       [e, c]
     );
 
-    if (existing.rowCount > 0) {
+    if ((existing.rowCount ?? 0) > 0) {
       await client.query("COMMIT");
       return NextResponse.json({ ok: true, reused: true });
     }
