@@ -57,25 +57,26 @@ export default function Page() {
 
 	  (async () => {
 		try {
-		  const res = await fetch(`${API_URL}/api/messages?session_id=${encodeURIComponent(
-			headers: {
+		  const res = await fetch(
+			`${API_URL}/api/messages?session_id=${encodeURIComponent(saved)}&limit=50`,
+			{
+			  headers: {
 				"Content-Type": "application/json",
 				"X-Access-Key": process.env.NEXT_PUBLIC_ACCESS_KEY!,
-			},
-			  saved
-			)
-			}&limit=50`
+			  },
+			}
 		  );
+
 		  if (!res.ok) return;
 
 		  const data = await res.json();
-		  // data should be: [{role, content}, ...]
 		  setMessages(data);
 		} catch {
 		  // ignore for now
 		}
 	  })();
 	}, []);
+
 
 
   async function sendMessage() {
