@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import React, { useEffect, useMemo, useRef, useState } from "react";
 
 type ChatMessage = {
   role: "user" | "assistant";
@@ -40,9 +40,57 @@ function parseSSE(buffer: string): { events: SSEEvent[]; rest: string } {
   return { events, rest };
 }
 
+/**
+ * ✅ InputBar is memoized so it DOES NOT re-render when messages stream.
+ * It owns its own "text" state, so typing stays snappy.
+ */
+const InputBar = React.memo(function InputBar(props: {
+  loading: boolean;
+  onSend: (text: string) => void;
+}) {
+  const { loading, onSend } = props;
+  const [text, setText] = useState("");
+
+  return (
+    <div
+      className="border-t bg-white px-3 py-2 flex gap-2 fixed bottom-0 left-0 right-0 max-w-md mx-auto"
+      style={{ paddingBottom: "calc(env(safe-area-inset-bottom) + 8px)" }}
+    >
+      <textarea
+        className="flex-1 border rounded px-3 py-2 min-h-11 max-h-28 overflow-y-auto text-base leading-5 resize-none bg-white text-black placeholder:text-gray-500"
+        placeholder="Type a message… (Enter = new line, Cmd/Ctrl+Enter = send)"
+        value={text}
+        disabled={loading}
+        rows={1}
+        onChange={(e) => setText(e.target.value)}
+        onKeyDown={(e) => {
+          if (e.key === "Enter" && (e.ctrlKey || e.metaKey)) {
+            e.preventDefault();
+            const trimmed = text.trim();
+            if (!trimmed || loading) return;
+            onSend(trimmed);
+            setText("");
+          }
+        }}
+      />
+      <button
+        onClick={() => {
+          const trimmed = text.trim();
+          if (!trimmed || loading) return;
+          onSend(trimmed);
+          setText("");
+        }}
+        disabled={loading}
+        className="px-4 h-11 rounded bg-blue-600 text-white text-base disabled:opacity-50"
+      >
+        Send
+      </button>
+    </div>
+  );
+});
+
 export default function Page() {
   const [messages, setMessages] = useState<ChatMessage[]>([]);
-  const [input, setInput] = useState("");
   const [loading, setLoading] = useState(false);
 
   const API_URL = process.env.NEXT_PUBLIC_API_URL || "http://127.0.0.1:8000";
@@ -54,11 +102,12 @@ export default function Page() {
   const scrollRef = useRef<HTMLDivElement | null>(null);
   const sendInFlightRef = useRef(false);
 
-  // streaming batch refs (fix typing lag)
+  // streaming batch refs
   const pendingAssistantTextRef = useRef("");
-  const streamRafRef = useRef<number | null>(null);
+  const flushTimerRef = useRef<number | null>(null);
 
-  // auto-scroll when messages change
+  // Auto-scroll ONLY when a message is added (length changes),
+  // not for every stream delta (keeps it smoother)
   useEffect(() => {
     const el = scrollRef.current;
     if (!el) return;
@@ -68,7 +117,7 @@ export default function Page() {
     });
   }, [messages.length]);
 
-  // load session on refresh
+  // Load session on refresh
   useEffect(() => {
     const saved = localStorage.getItem("rp_session_id");
     if (!saved) return;
@@ -94,19 +143,17 @@ export default function Page() {
     })();
   }, [API_URL, ACCESS_KEY]);
 
-  async function sendMessage() {
-    if (!input.trim() || loading) return;
+  async function sendMessage(text: string) {
+    if (!text.trim() || loading) return;
     if (sendInFlightRef.current) return;
 
     sendInFlightRef.current = true;
-
-    const userText = input;
-    setInput("");
     setLoading(true);
 
+    // add user message + blank assistant message to stream into
     setMessages((prev) => [
       ...prev,
-      { role: "user", content: userText },
+      { role: "user", content: text },
       { role: "assistant", content: "" },
     ]);
 
@@ -120,7 +167,7 @@ export default function Page() {
           "X-Access-Key": ACCESS_KEY,
         },
         body: JSON.stringify({
-          text: userText,
+          text,
           session_id: sessionId,
           world_name: "Dev World",
         }),
@@ -132,6 +179,18 @@ export default function Page() {
       const reader = res.body.getReader();
       const decoder = new TextDecoder();
       let buffer = "";
+
+      const flushAssistant = () => {
+        // write pending text into last assistant bubble
+        setMessages((prev) => {
+          const next = [...prev];
+          next[next.length - 1] = {
+            role: "assistant",
+            content: pendingAssistantTextRef.current,
+          };
+          return next;
+        });
+      };
 
       while (true) {
         const { value, done } = await reader.read();
@@ -154,25 +213,32 @@ export default function Page() {
 
             pendingAssistantTextRef.current += delta;
 
-            if (streamRafRef.current == null) {
-              streamRafRef.current = requestAnimationFrame(() => {
-                streamRafRef.current = null;
-
-                setMessages((prev) => {
-                  const next = [...prev];
-                  next[next.length - 1] = {
-                    role: "assistant",
-                    content: pendingAssistantTextRef.current,
-                  };
-                  return next;
-                });
-              });
+            // ✅ Throttle UI updates to ~20fps (every 50ms) to reduce jank further
+            if (flushTimerRef.current == null) {
+              flushTimerRef.current = window.setTimeout(() => {
+                flushTimerRef.current = null;
+                flushAssistant();
+              }, 50);
             }
           } else if (evt.event === "error") {
             throw new Error(evt.data?.error ?? "Stream error");
           }
         }
       }
+
+      // final flush in case something is pending
+      if (flushTimerRef.current != null) {
+        clearTimeout(flushTimerRef.current);
+        flushTimerRef.current = null;
+      }
+      setMessages((prev) => {
+        const next = [...prev];
+        next[next.length - 1] = {
+          role: "assistant",
+          content: pendingAssistantTextRef.current,
+        };
+        return next;
+      });
     } catch (err: any) {
       setMessages((prev) => {
         const next = [...prev];
@@ -183,15 +249,17 @@ export default function Page() {
         return next;
       });
     } finally {
-      if (streamRafRef.current != null) {
-        cancelAnimationFrame(streamRafRef.current);
-        streamRafRef.current = null;
+      if (flushTimerRef.current != null) {
+        clearTimeout(flushTimerRef.current);
+        flushTimerRef.current = null;
       }
-
       sendInFlightRef.current = false;
       setLoading(false);
     }
   }
+
+  // Stable callback so InputBar doesn't rerender
+  const onSend = useMemo(() => (text: string) => sendMessage(text), [sessionId, loading]);
 
   return (
     <main className="flex flex-col h-[100dvh] max-w-md mx-auto border-x">
@@ -217,35 +285,7 @@ export default function Page() {
         ))}
       </div>
 
-      <div
-        className="border-t bg-white px-3 py-2 flex gap-2 fixed bottom-0 left-0 right-0 max-w-md mx-auto"
-        style={{ paddingBottom: "calc(env(safe-area-inset-bottom) + 8px)" }}
-      >
-        <textarea
-          className="flex-1 border rounded px-3 py-2 min-h-11 max-h-28 overflow-y-auto text-base leading-5 resize-none bg-white text-black placeholder:text-gray-500"
-          placeholder="Type a message… (Enter = new line, Cmd/Ctrl+Enter = send)"
-          value={input}
-          disabled={loading}
-          rows={1}
-          onChange={(e) => setInput(e.target.value)}
-          onKeyDown={(e) => {
-            if (
-              e.key === "Enter" &&
-              (e.ctrlKey || e.metaKey)
-            ) {
-              e.preventDefault();
-              sendMessage();
-            }
-          }}
-        />
-        <button
-          onClick={sendMessage}
-          disabled={loading}
-          className="px-4 h-11 rounded bg-blue-600 text-white text-base disabled:opacity-50"
-        >
-          Send
-        </button>
-      </div>
+      <InputBar loading={loading} onSend={onSend} />
     </main>
   );
 }
