@@ -281,14 +281,22 @@ export default function Page() {
 		  className="border-t bg-white px-3 py-2 flex gap-2 fixed bottom-0 left-0 right-0 max-w-md mx-auto"
 		  style={{ paddingBottom: "calc(env(safe-area-inset-bottom) + 8px)" }}
 		>
-		  <input
-			className="flex-1 border rounded px-3 h-11 text-base"
-			placeholder="Type a message…"
+		  <textarea
+			className="flex-1 border rounded px-3 py-2 min-h-11 max-h-28 overflow-y-auto text-base leading-5 resize-none bg-white text-black placeholder:text-gray-500"
+
+			placeholder="Type a message… (Enter = new line, Ctrl/Cmd+Enter = send)"
 			value={input}
 			disabled={loading}
+			rows={1}
 			onChange={(e) => setInput(e.target.value)}
 			onKeyDown={(e) => {
-			  if (e.key === "Enter") sendMessage();
+			  // Enter should make a new line by default
+			  // Ctrl+Enter (Windows) / Cmd+Enter (Mac) sends
+			  const isSendCombo = (e.key === "Enter" && (e.ctrlKey || e.metaKey));
+			  if (isSendCombo) {
+				e.preventDefault();
+				sendMessage();
+			  }
 			}}
 		  />
 		  <button
@@ -299,6 +307,7 @@ export default function Page() {
 			Send
 		  </button>
 		</div>
+
 	  </main>
 	);
 
